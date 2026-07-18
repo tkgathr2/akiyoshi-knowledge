@@ -6,10 +6,26 @@
 import pino from 'pino';
 import { AlertRule, AlertEvent, AlertCondition, MetricSnapshot, NotificationTarget } from './types/metrics';
 
+/**
+ * ルール別の評価ステート
+ * - consecutiveCount: 連続で条件を満たした回数
+ * - firstExceedTime: 条件を満たし続けている区間の開始時刻（ms epoch）
+ * - lastNotifiedAt: 直近にアラートを発火した時刻（ms epoch）
+ */
+export interface RuleState {
+  consecutiveCount: number;
+  firstExceedTime: number | null;
+  lastNotifiedAt: number | null;
+}
+
 export class AlertEngine {
   private alerts: Map<string, AlertEvent> = new Map();
   private logger: pino.Logger;
   private ruleMap: Map<string, AlertRule> = new Map();
+  private ruleState: Map<string, RuleState> = new Map();
+
+  // duration/consecutive条件付きルールが一度発火した後の再通知抑止期間（3時間）
+  private readonly NOTIFICATION_COOLDOWN_MS = 3 * 60 * 60 * 1000;
 
   constructor(logger?: pino.Logger) {
     this.logger = logger || pino({ name: 'AlertEngine' });
@@ -224,13 +240,13 @@ export class AlertEngine {
    * 単一ルール評価
    */
   private evaluateRule(rule: AlertRule, snapshot: MetricSnapshot): AlertEvent | null {
-    const { metric, operator, threshold } = rule.condition;
+    const { metric, operator, threshold, duration, consecutive } = rule.condition;
     let value: number;
 
     // メトリクス値の取得
     switch (metric) {
       case 'errorRate':
-        // totalOpsを分母にした実値ベースの計算(P0-3修正: 旧式 errorCount/(errorCount+100)は実値と乖離するため廃止)
+        // totalOpsを分母にした実値ベースの計算（P0-3修正: 旧式 errorCount/(errorCount+100) は実値と乖離するため廃止）
         value = snapshot.totalOps > 0 ? (snapshot.errorCount / snapshot.totalOps) * 100 : 0;
         break;
       case 'circuitBreakerOpen':
@@ -258,11 +274,64 @@ export class AlertEngine {
     }
 
     // 条件判定
-    if (!this.compareValues(value, operator, threshold)) {
+    const conditionMet = this.compareValues(value, operator, threshold);
+
+    // duration/consecutive条件を持たないルールは従来通り即時判定（ステート管理なし）
+    if (duration === undefined && consecutive === undefined) {
+      if (!conditionMet) {
+        return null;
+      }
+      return this.buildAlertEvent(rule, metric, value, operator, threshold);
+    }
+
+    // duration/consecutive条件を持つルールはルール別ステートで継続時間・連続回数を追跡
+    const state = this.getOrCreateRuleState(rule.id);
+
+    if (!conditionMet) {
+      // 条件を満たさなくなったらステートをリセット（次回また0からカウント）
+      this.resetRuleState(rule.id);
       return null;
     }
 
-    // アラートイベント生成
+    const now = Date.now();
+    state.consecutiveCount += 1;
+    if (state.firstExceedTime === null) {
+      state.firstExceedTime = now;
+    }
+
+    // consecutive条件: 指定回数連続で条件を満たすまでは発火しない
+    if (consecutive !== undefined && state.consecutiveCount < consecutive) {
+      return null;
+    }
+
+    // duration条件: 条件を満たし続けている時間が閾値に達するまでは発火しない
+    if (duration !== undefined) {
+      const elapsed = now - state.firstExceedTime;
+      if (elapsed < duration) {
+        return null;
+      }
+    }
+
+    // クールダウン: 発火済みなら一定期間は再発火を抑止（初発火時のみ通知）
+    if (state.lastNotifiedAt !== null && now - state.lastNotifiedAt < this.NOTIFICATION_COOLDOWN_MS) {
+      return null;
+    }
+
+    state.lastNotifiedAt = now;
+
+    return this.buildAlertEvent(rule, metric, value, operator, threshold);
+  }
+
+  /**
+   * アラートイベント生成
+   */
+  private buildAlertEvent(
+    rule: AlertRule,
+    metric: string,
+    value: number,
+    operator: string,
+    threshold: number
+  ): AlertEvent {
     return {
       id: `${rule.id}-${Date.now()}`,
       ruleId: rule.id,
@@ -273,6 +342,32 @@ export class AlertEngine {
       severity: rule.severity,
       acknowledged: false,
     };
+  }
+
+  /**
+   * ルール別ステート取得（存在しなければ初期化）
+   */
+  private getOrCreateRuleState(ruleId: string): RuleState {
+    let state = this.ruleState.get(ruleId);
+    if (!state) {
+      state = { consecutiveCount: 0, firstExceedTime: null, lastNotifiedAt: null };
+      this.ruleState.set(ruleId, state);
+    }
+    return state;
+  }
+
+  /**
+   * ルール別ステートをリセット（条件が正常値に戻った場合）
+   */
+  private resetRuleState(ruleId: string): void {
+    this.ruleState.set(ruleId, { consecutiveCount: 0, firstExceedTime: null, lastNotifiedAt: null });
+  }
+
+  /**
+   * ルール別ステート取得（テスト・監視用）
+   */
+  getRuleState(ruleId: string): RuleState | undefined {
+    return this.ruleState.get(ruleId);
   }
 
   /**

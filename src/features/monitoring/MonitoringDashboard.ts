@@ -8,7 +8,7 @@
 import pino from 'pino';
 import { MetricSnapshot, AlertRule, AlertEvent, DailyAggregation } from './types/metrics';
 import { MetricsCollector, OperationRecord } from './MetricsCollector';
-import { AlertEngine } from './AlertEngine';
+import { AlertEngine, RuleState } from './AlertEngine';
 import { MonitoringLogger } from './MonitoringLogger';
 import { NotificationEngine, NotificationConfig } from './NotificationEngine';
 
@@ -354,6 +354,13 @@ export class MonitoringDashboard {
 
   setAllTestMode(dryRun: boolean): void {
     this.alertEngine.setAllTestMode(dryRun);
+  }
+
+  /**
+   * ルール別ステート取得（duration/consecutive評価の継続時間・連続回数・テスト用）
+   */
+  getRuleState(ruleId: string): RuleState | undefined {
+    return this.alertEngine.getRuleState(ruleId);
   }
 
   /**
