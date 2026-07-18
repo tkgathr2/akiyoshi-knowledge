@@ -57,27 +57,44 @@ export class NotificationEngine {
 
   /**
    * 単一の通知を送信
+   * 通知失敗を握り潰し、本処理に伝播させない（fire-and-forget パターン）
    */
   private async sendNotification(alert: AlertEvent, target: NotificationTarget): Promise<void> {
-    switch (target.type) {
-      case 'slack':
-        await this.sendSlackNotification(alert, target.destination);
-        break;
-      case 'email':
-        await this.sendEmailNotification(alert, target.destination);
-        break;
-      case 'log':
-        this.sendLogNotification(alert, target.destination);
-        break;
-    }
+    try {
+      switch (target.type) {
+        case 'slack':
+          await this.sendSlackNotification(alert, target.destination);
+          break;
+        case 'email':
+          await this.sendEmailNotification(alert, target.destination);
+          break;
+        case 'log':
+          this.sendLogNotification(alert, target.destination);
+          break;
+      }
 
-    // 成功を記録
-    this.notificationHistory.push({
-      alertId: alert.id,
-      target: target.destination,
-      timestamp: new Date(),
-      status: 'success',
-    });
+      // 成功を記録
+      this.notificationHistory.push({
+        alertId: alert.id,
+        target: target.destination,
+        timestamp: new Date(),
+        status: 'success',
+      });
+    } catch (error) {
+      // 通知失敗を握り潰す（本処理には伝播させない）
+      this.logger.error(
+        { alertId: alert.id, target: target.destination, error },
+        'Notification delivery failed but will not affect alert processing'
+      );
+
+      // 失敗を記録（外側の sendAlert catch とは独立）
+      this.notificationHistory.push({
+        alertId: alert.id,
+        target: target.destination,
+        timestamp: new Date(),
+        status: 'failed',
+      });
+    }
   }
 
   /**
