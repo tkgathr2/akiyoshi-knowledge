@@ -100,7 +100,9 @@ export class NotionKnowledgeClient {
         filter: {
           property: 'status',
           status: {
-            equals: 'done',
+            // Notion ワークスペースの status プロパティは日本語テンプレート既定（未着手/進行中/完了）。
+            // API からは英語名のオプションを作成できないため、実運用データベースの完了オプション名に合わせる。
+            equals: '完了',
           },
         },
       });

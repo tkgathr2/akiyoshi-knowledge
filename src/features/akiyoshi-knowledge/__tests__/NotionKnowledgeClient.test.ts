@@ -80,7 +80,7 @@ describe('NotionKnowledgeClient', () => {
         sorts: [{ property: 'created_time', direction: 'descending' }],
         filter: {
           property: 'status',
-          status: { equals: 'done' },
+          status: { equals: '完了' },
         },
       });
     });
