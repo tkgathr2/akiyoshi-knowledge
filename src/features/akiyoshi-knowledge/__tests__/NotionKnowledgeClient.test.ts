@@ -192,6 +192,76 @@ describe('NotionKnowledgeClient', () => {
   });
 
 
+  describe('UT-103: Notion SDK エラー型マッピング', () => {
+    it('should convert a raw 401 APIResponseError-shaped error into NotionFetchError and stop immediately', async () => {
+      const sdkError = Object.assign(new Error('API token is invalid.'), {
+        status: 401,
+        code: 'unauthorized',
+      });
+      mockDatabasesQuery.mockRejectedValueOnce(sdkError);
+
+      expect.assertions(5);
+      try {
+        await client.fetchLatest(10);
+      } catch (error) {
+        expect(error).toBeInstanceOf(NotionFetchError);
+        const notionError = error as NotionFetchError;
+        expect(notionError.statusCode).toBe(401);
+        expect(notionError.notionErrorCode).toBe('unauthorized');
+        expect(notionError.isStructuralError()).toBe(true);
+      }
+
+      // 401 は構造的エラー -> リトライせず即打ち切り（呼び出しは1回のみ）
+      expect(mockDatabasesQuery).toHaveBeenCalledTimes(1);
+    });
+
+    it('should convert a raw 403 APIResponseError-shaped error into NotionFetchError and stop immediately', async () => {
+      const sdkError = Object.assign(new Error('Access denied.'), {
+        status: 403,
+        code: 'restricted_resource',
+      });
+      mockDatabasesQuery.mockRejectedValueOnce(sdkError);
+
+      expect.assertions(5);
+      try {
+        await client.fetchLatest(10);
+      } catch (error) {
+        expect(error).toBeInstanceOf(NotionFetchError);
+        const notionError = error as NotionFetchError;
+        expect(notionError.statusCode).toBe(403);
+        expect(notionError.notionErrorCode).toBe('restricted_resource');
+        expect(notionError.isStructuralError()).toBe(true);
+      }
+
+      // 構造的エラーはリトライしない = 1回のみ呼び出し
+      expect(mockDatabasesQuery).toHaveBeenCalledTimes(1);
+    });
+
+    it('should convert a raw 429 APIResponseError-shaped error into a retryable NotionFetchError', async () => {
+      const sdkError = Object.assign(new Error('Rate limited.'), {
+        status: 429,
+        code: 'rate_limited',
+      });
+      mockDatabasesQuery
+        .mockRejectedValueOnce(sdkError)
+        .mockResolvedValueOnce({ results: [] });
+
+      const result = await client.fetchLatest(10);
+
+      expect(result).toEqual([]);
+      // 429 は非構造的エラー -> リトライして2回目で成功
+      expect(mockDatabasesQuery).toHaveBeenCalledTimes(2);
+    });
+
+    it('should not convert errors without a status field', async () => {
+      const networkError = new TypeError('fetch failed');
+      mockDatabasesQuery.mockRejectedValue(networkError);
+
+      await expect(client.fetchLatest(10)).rejects.toThrow(TypeError);
+      await expect(client.fetchLatest(10)).rejects.not.toThrow(NotionFetchError);
+    });
+  });
+
   describe('Token masking', () => {
     it('should mask API token correctly', () => {
       const token = 'notiontokenexample123456';

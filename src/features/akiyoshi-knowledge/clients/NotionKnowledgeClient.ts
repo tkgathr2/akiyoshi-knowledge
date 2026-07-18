@@ -87,24 +87,38 @@ export class NotionKnowledgeClient {
    * POST /v1/databases/{db_id}/query
    */
   private async queryDatabase(limit: number): Promise<KnowledgeEntry[]> {
-    const response = await this.client.databases.query({
-      database_id: this.pageId,
-      page_size: Math.min(limit, 100),
-      sorts: [
-        {
-          property: 'created_time',
-          direction: 'descending',
+    try {
+      const response = await this.client.databases.query({
+        database_id: this.pageId,
+        page_size: Math.min(limit, 100),
+        sorts: [
+          {
+            property: 'created_time',
+            direction: 'descending',
+          },
+        ],
+        filter: {
+          property: 'status',
+          status: {
+            equals: 'done',
+          },
         },
-      ],
-      filter: {
-        property: 'status',
-        status: {
-          equals: 'done',
-        },
-      },
-    });
+      });
 
-    return response.results.map((page) => this.mapPageToEntry(page));
+      return response.results.map((page) => this.mapPageToEntry(page));
+    } catch (error) {
+      // Notion SDK の APIResponseError（status/code を持つ）を NotionFetchError へ変換。
+      // status 401/403 は NotionFetchError.isStructuralError()=true となり、
+      // retryWithBackoff で即リトライ打ち切りの対象になる。
+      const status = (error as { status?: unknown } | null)?.status;
+      if (typeof status === 'number') {
+        const notionErrorCode = (error as { code?: string }).code;
+        const message = error instanceof Error ? error.message : undefined;
+        throw new NotionFetchError(status, notionErrorCode, message);
+      }
+
+      throw error; // status を持たない未知のエラーはそのまま伝播
+    }
   }
 
   /**
