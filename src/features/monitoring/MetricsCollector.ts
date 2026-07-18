@@ -53,6 +53,27 @@ export class MetricsCollector {
   }
 
   /**
+   * オペレーション記録から totalOps/successOps/successRate を算出
+   * getCurrentMetrics と generateDailyAggregation で同一の定義を共有するための単一ソース（P0-3修正）
+   * totalOps = fetch + cache_hit + fallback の合計（error, cache_missは含まない）
+   * successOps = fetch + cache_hit の合計
+   */
+  private computeOpsMetrics(records: OperationRecord[]): {
+    totalOps: number;
+    successOps: number;
+    successRate: number;
+  } {
+    const successOps = records.filter(
+      (r) => r.operation === 'fetch' || r.operation === 'cache_hit'
+    ).length;
+    const fallbacks = records.filter((r) => r.operation === 'fallback').length;
+    const totalOps = successOps + fallbacks;
+    const successRate = totalOps > 0 ? (successOps / totalOps) * 100 : 0;
+
+    return { totalOps, successOps, successRate };
+  }
+
+  /**
    * 現在のメトリクス スナップショット取得
    */
   getCurrentMetrics(): MetricSnapshot {
@@ -63,14 +84,13 @@ export class MetricsCollector {
     const recentRecords = this.records.filter((r) => r.timestamp > oneHourAgo);
 
     // メトリクス計算
-    const totalOps = recentRecords.length;
-    const successOps = recentRecords.filter((r) => r.operation === 'fetch').length;
+    const windowOpsCount = recentRecords.length;
+    const { totalOps, successRate } = this.computeOpsMetrics(recentRecords);
     const cacheHits = recentRecords.filter((r) => r.operation === 'cache_hit').length;
     const fallbacks = recentRecords.filter((r) => r.operation === 'fallback').length;
     const errors = recentRecords.filter((r) => r.operation === 'error').length;
 
-    const successRate = totalOps > 0 ? (successOps / totalOps) * 100 : 100;
-    const cacheHitRate = totalOps > 0 ? (cacheHits / totalOps) * 100 : 0;
+    const cacheHitRate = windowOpsCount > 0 ? (cacheHits / windowOpsCount) * 100 : 0;
 
     // レイテンシ計算（平均）
     const latencies = recentRecords.map((r) => r.latency);
@@ -94,6 +114,7 @@ export class MetricsCollector {
 
     return {
       timestamp: now,
+      totalOps,
       successRate: Math.round(successRate * 100) / 100,
       avgLatency: Math.round(avgLatency * 100) / 100,
       cacheHitRate: Math.round(cacheHitRate * 100) / 100,
@@ -140,15 +161,8 @@ export class MetricsCollector {
       (r) => r.timestamp >= startOfDay && r.timestamp <= endOfDay
     );
 
-    const successRates = dayRecords
-      .filter((r) => ['fetch', 'cache_hit', 'error'].includes(r.operation))
-      .map((r) => (r.operation === 'error' ? 0 : 1));
-
-    const successSum = successRates.reduce((a: number, b: number) => a + b, 0);
-    const avgSuccessRate =
-      successRates.length > 0
-        ? (successSum / successRates.length) * 100
-        : 100;
+    // getCurrentMetrics と同一の定義（fetch+cache_hitをsuccess、fetch+cache_hit+fallbackをtotalOps）で算出（P0-3修正）
+    const { successRate: avgSuccessRate } = this.computeOpsMetrics(dayRecords);
 
     // P95レイテンシ計算
     const latencies = dayRecords.map((r) => r.latency).sort((a, b) => a - b);

@@ -5,6 +5,7 @@
 
 export interface MetricSnapshot {
   timestamp: Date;
+  totalOps: number; // 件数: 集計対象オペレーション合計（fetch + cache_hit + fallback）。errorRate/successRateの分母
   successRate: number; // 0-100: 取得成功率（目標100%）
   avgLatency: number; // ms: 平均レイテンシ（目標<1500ms）
   cacheHitRate: number; // 0-100: キャッシュヒット率（観察指標）

@@ -230,7 +230,8 @@ export class AlertEngine {
     // メトリクス値の取得
     switch (metric) {
       case 'errorRate':
-        value = ((snapshot.errorCount / (snapshot.errorCount + 100)) * 100);
+        // totalOpsを分母にした実値ベースの計算(P0-3修正: 旧式 errorCount/(errorCount+100)は実値と乖離するため廃止)
+        value = snapshot.totalOps > 0 ? (snapshot.errorCount / snapshot.totalOps) * 100 : 0;
         break;
       case 'circuitBreakerOpen':
         value = snapshot.circuitBreakerOpen ? 1 : 0;
