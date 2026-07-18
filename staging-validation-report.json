@@ -1,0 +1,28 @@
+{
+  "testDate": "2026-07-18T11:50:01.561Z",
+  "metrics": [
+    {
+      "operation": "L0-normal-fetch",
+      "durationMs": 206,
+      "source": "notion",
+      "cacheHit": false
+    },
+    {
+      "operation": "L1-degraded-fetch",
+      "durationMs": 0,
+      "source": "cache",
+      "cacheHit": true
+    },
+    {
+      "operation": "L2-reduced-error",
+      "durationMs": 100,
+      "source": "stale-cache",
+      "cacheHit": false
+    }
+  ],
+  "summary": {
+    "p50Ms": 100,
+    "p95Ms": 206,
+    "averageMs": 102
+  }
+}

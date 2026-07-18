@@ -1,0 +1,12 @@
+{
+  "testDate": "2026-07-18T11:50:01.562Z",
+  "decision": "NOGO",
+  "performance": {
+    "p95Target": "<3000ms",
+    "actual": "206ms",
+    "result": "PASS"
+  },
+  "fallback": {
+    "overallResult": "FAIL"
+  }
+}

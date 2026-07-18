@@ -1,0 +1,34 @@
+{
+  "testDate": "2026-07-18T11:50:01.562Z",
+  "results": [
+    {
+      "level": "L0",
+      "scenario": "Normal Notion fetch",
+      "result": "PASS",
+      "reason": "Notion取得成功 (206ms)"
+    },
+    {
+      "level": "L1",
+      "scenario": "429 Rate Limited → Stale Cache",
+      "result": "FAIL",
+      "reason": "リトライ失敗後、キャッシュ使用 (source: cache)"
+    },
+    {
+      "level": "L2",
+      "scenario": "No Connection → Minimal Prompt",
+      "result": "PASS",
+      "reason": "接続遮断時の最小限プロンプト構成成功"
+    },
+    {
+      "level": "L3",
+      "scenario": "Circuit Breaker Open",
+      "result": "PASS",
+      "reason": "Circuit Breaker開放検出 (5エラー)"
+    }
+  ],
+  "summary": {
+    "totalTests": 4,
+    "passed": 3,
+    "failed": 1
+  }
+}
