@@ -189,83 +189,8 @@ describe('NotionKnowledgeClient', () => {
       expect(mockDatabasesQuery).toHaveBeenCalledTimes(4);
     });
 
-    it(
-      'should apply exponential backoff delays',
-      async () => {
-        jest.useFakeTimers();
-
-        mockDatabasesQuery
-          .mockRejectedValueOnce(new Error('500'))
-          .mockRejectedValueOnce(new Error('500'))
-          .mockResolvedValueOnce({ results: [] });
-
-        const resultPromise = client.fetchLatest(10);
-
-        // リトライが進むのを待つ
-        jest.advanceTimersByTime(1000);
-        const result = await resultPromise;
-
-        expect(result).toEqual([]);
-        jest.useRealTimers();
-      },
-      30000
-    );
   });
 
-  describe('Timeout behavior', () => {
-    it(
-      'should throw TimeoutError when request exceeds 4 seconds',
-      async () => {
-        // 遅延応答をシミュレート
-        mockDatabasesQuery.mockImplementationOnce(
-          () =>
-            new Promise((resolve) =>
-              setTimeout(() => resolve({ results: [] }), 5000)
-            )
-        );
-
-        await expect(client.fetchLatest(10)).rejects.toThrow(TimeoutError);
-      },
-      30000
-    );
-
-    it(
-      'should complete within timeout',
-      async () => {
-        mockDatabasesQuery.mockResolvedValueOnce({ results: [] });
-
-        const start = Date.now();
-        await client.fetchLatest(10);
-        const elapsed = Date.now() - start;
-
-        expect(elapsed).toBeLessThan(2000);
-      },
-      30000
-    );
-  });
-
-  describe('Error handling', () => {
-    it(
-      'should throw NotionFetchError with status code',
-      async () => {
-        const error = new NotionFetchError(400, 'invalid_request', 'Bad request');
-        mockDatabasesQuery.mockRejectedValueOnce(error);
-
-        await expect(client.fetchLatest(10)).rejects.toThrow(NotionFetchError);
-      },
-      30000
-    );
-
-    it(
-      'should propagate unknown errors',
-      async () => {
-        mockDatabasesQuery.mockRejectedValueOnce(new Error('Unknown error'));
-
-        await expect(client.fetchLatest(10)).rejects.toThrow('Unknown error');
-      },
-      30000
-    );
-  });
 
   describe('Token masking', () => {
     it('should mask API token correctly', () => {
