@@ -1,0 +1,283 @@
+{
+  "version": "1.0.0",
+  "status": "PRODUCTION LIVE",
+  "deployedAt": "2026-07-18T21:00:00Z",
+  "monitoringStatus": "ACTIVE",
+  "description": "秋好ナレッジシステム 24時間本番監視ダッシュボード",
+  "dashboard": {
+    "updateInterval": 60000,
+    "metricsTracked": 9,
+    "alertRulesEnabled": 8,
+    "retentionDays": 30,
+    "autoExportInterval": 3600000
+  },
+  "metrics": {
+    "count": 9,
+    "items": [
+      {
+        "id": 1,
+        "name": "取得成功率",
+        "key": "successRate",
+        "unit": "%",
+        "target": 100,
+        "type": "percentage"
+      },
+      {
+        "id": 2,
+        "name": "平均レイテンシ",
+        "key": "avgLatency",
+        "unit": "ms",
+        "target": 1500,
+        "type": "latency"
+      },
+      {
+        "id": 3,
+        "name": "キャッシュヒット率",
+        "key": "cacheHitRate",
+        "unit": "%",
+        "type": "observation"
+      },
+      {
+        "id": 4,
+        "name": "エラー件数",
+        "key": "errorCount",
+        "unit": "件",
+        "target": 0,
+        "type": "count"
+      },
+      {
+        "id": 5,
+        "name": "Slack通知数",
+        "key": "slackNotificationCount",
+        "unit": "件",
+        "type": "aggregation"
+      },
+      {
+        "id": 6,
+        "name": "Circuit Breaker状態",
+        "key": "circuitBreakerOpen",
+        "type": "state"
+      },
+      {
+        "id": 7,
+        "name": "フォールバック件数",
+        "key": "fallbackCount",
+        "unit": "件",
+        "type": "observation"
+      },
+      {
+        "id": 8,
+        "name": "Notion API応答時間",
+        "key": "notionApiResponseTime",
+        "unit": "ms",
+        "type": "latency"
+      },
+      {
+        "id": 9,
+        "name": "キャッシュサイズ利用率",
+        "key": "cacheUtilizationPercent",
+        "unit": "%",
+        "type": "percentage"
+      }
+    ]
+  },
+  "alertRules": [
+    {
+      "id": "ALERT-001",
+      "name": "High Error Rate (>5% for 30 min)",
+      "metric": "errorRate",
+      "operator": ">",
+      "threshold": 5,
+      "duration": 1800000,
+      "severity": "critical",
+      "enabled": true,
+      "testMode": false,
+      "notificationTargets": [
+        {
+          "type": "slack",
+          "destination": "@takagi"
+        },
+        {
+          "type": "log",
+          "destination": "alert-critical"
+        }
+      ]
+    },
+    {
+      "id": "ALERT-002",
+      "name": "Circuit Breaker Open",
+      "metric": "circuitBreakerOpen",
+      "operator": "==",
+      "threshold": 1,
+      "severity": "critical",
+      "enabled": true,
+      "testMode": false,
+      "notificationTargets": [
+        {
+          "type": "slack",
+          "destination": "@takagi"
+        },
+        {
+          "type": "log",
+          "destination": "alert-critical"
+        }
+      ]
+    },
+    {
+      "id": "ALERT-003",
+      "name": "Notion API Down",
+      "metric": "notionApiResponseTime",
+      "operator": ">",
+      "threshold": 4000,
+      "severity": "critical",
+      "enabled": true,
+      "testMode": false,
+      "notificationTargets": [
+        {
+          "type": "slack",
+          "destination": "@takagi"
+        },
+        {
+          "type": "log",
+          "destination": "alert-critical"
+        }
+      ]
+    },
+    {
+      "id": "ALERT-004",
+      "name": "High Latency (>6s, 3x consecutive)",
+      "metric": "avgLatency",
+      "operator": ">",
+      "threshold": 6000,
+      "consecutive": 3,
+      "severity": "warning",
+      "enabled": true,
+      "testMode": false,
+      "notificationTargets": [
+        {
+          "type": "slack",
+          "destination": "#engineering"
+        },
+        {
+          "type": "log",
+          "destination": "alert-warning"
+        }
+      ]
+    },
+    {
+      "id": "ALERT-005",
+      "name": "Low Success Rate (<95%)",
+      "metric": "successRate",
+      "operator": "<",
+      "threshold": 95,
+      "severity": "warning",
+      "enabled": true,
+      "testMode": false,
+      "notificationTargets": [
+        {
+          "type": "slack",
+          "destination": "#engineering"
+        },
+        {
+          "type": "log",
+          "destination": "alert-warning"
+        }
+      ]
+    },
+    {
+      "id": "ALERT-006",
+      "name": "Low Cache Hit Rate (<50%)",
+      "metric": "cacheHitRate",
+      "operator": "<",
+      "threshold": 50,
+      "severity": "warning",
+      "enabled": true,
+      "testMode": false,
+      "notificationTargets": [
+        {
+          "type": "slack",
+          "destination": "#engineering"
+        },
+        {
+          "type": "log",
+          "destination": "alert-warning"
+        }
+      ]
+    },
+    {
+      "id": "ALERT-007",
+      "name": "Notion API Degraded (>3s)",
+      "metric": "notionApiResponseTime",
+      "operator": ">",
+      "threshold": 3000,
+      "severity": "info",
+      "enabled": true,
+      "testMode": false,
+      "notificationTargets": [
+        {
+          "type": "slack",
+          "destination": "#engineering"
+        },
+        {
+          "type": "log",
+          "destination": "alert-info"
+        }
+      ]
+    },
+    {
+      "id": "ALERT-008",
+      "name": "Slack Notification Failure",
+      "metric": "slackNotificationFailed",
+      "operator": "==",
+      "threshold": 1,
+      "severity": "warning",
+      "enabled": true,
+      "testMode": false,
+      "notificationTargets": [
+        {
+          "type": "log",
+          "destination": "alert-notification-failure"
+        }
+      ]
+    }
+  ],
+  "monitoring": {
+    "logFormat": "json",
+    "logDirectory": "./logs/monitoring",
+    "exportInterval": 3600000,
+    "retentionDays": 30,
+    "autoExportEnabled": true,
+    "autoBackupEnabled": true
+  },
+  "notifications": {
+    "dailyAggregationTimes": ["00:00", "12:00"],
+    "timezone": "UTC",
+    "channels": {
+      "critical": ["@takagi", "log"],
+      "warning": ["#engineering", "log"],
+      "info": ["#engineering", "log"]
+    }
+  },
+  "escalation": {
+    "level1": "@takagi (immediate)",
+    "level2": "#engineering (5 min)",
+    "level3": "Team Lead (15 min)",
+    "documentationUrl": "https://github.com/takagi-group/akiyoshi-knowledge/blob/master/PRODUCTION-DEPLOYMENT-GUIDE.md"
+  },
+  "testMode": {
+    "enabled": false,
+    "description": "Set to true to run all alerts in DRY_RUN mode without sending actual notifications"
+  },
+  "goLiveStatus": {
+    "timestamp": "2026-07-18T21:00:00Z",
+    "decision": "GO",
+    "reason": "Production monitoring infrastructure ready",
+    "checks": {
+      "dashboardConfigured": true,
+      "alertRulesEnabled": true,
+      "loggingConfigured": true,
+      "notificationChannelsConfigured": true,
+      "e2eTestingCompleted": true
+    }
+  }
+}
