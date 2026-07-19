@@ -39,35 +39,71 @@ export class NotionKnowledgeWriter {
   }
 
   /**
-   * 既に取り込み済みの動画 URL 一覧を取得する。
+   * 既に取り込み済みの動画を判別するためのキー集合を取得する。
    *
-   * 動画 URL は各ページ本文の先頭ブロックに書いているのではなく、
-   * summary プロパティの先頭行に「出典: <URL>」形式で保存している。
-   * これによりスキーマ変更なしで重複判定ができる。
+   * 2 種類のキーを集める:
+   *   1. 動画 ID  — summary 先頭の「出典: <URL>」から抽出（本機能が書いたページ）
+   *   2. 正規化タイトル — title プロパティから生成（人が手で追記したページ）
+   *
+   * 2 を併用する理由: 本機能の導入前に人手で追記されたページには出典 URL が無く、
+   * 動画 ID だけで判定すると同じ動画をもう一度書き込んで重複させてしまうため。
    */
-  async fetchIngestedVideoIds(limit = 100): Promise<Set<string>> {
-    const ids = new Set<string>();
+  async fetchIngestedKeys(limit = 200): Promise<Set<string>> {
+    const keys = new Set<string>();
     let cursor: string | undefined;
+    let scanned = 0;
 
-    while (ids.size < limit) {
+    while (scanned < limit) {
       const response = await this.client.databases.query({
         database_id: this.databaseId,
-        page_size: Math.min(100, limit - ids.size),
+        page_size: Math.min(100, limit - scanned),
         start_cursor: cursor,
       });
 
       for (const page of response.results as Array<Record<string, any>>) {
+        scanned += 1;
+
         const summary = this.extractRichText(page?.properties?.summary);
         const videoId = this.extractVideoId(summary);
-        if (videoId) ids.add(videoId);
+        if (videoId) keys.add(videoId);
+
+        const title = this.extractTitle(page?.properties?.title);
+        const normalized = NotionKnowledgeWriter.normalizeTitle(title);
+        if (normalized) keys.add(normalized);
       }
 
       if (!response.has_more || !response.next_cursor) break;
       cursor = response.next_cursor;
     }
 
-    this.logger.info({ count: ids.size }, 'Fetched already-ingested video ids');
-    return ids;
+    this.logger.info({ keys: keys.size, scanned }, 'Fetched already-ingested keys');
+    return keys;
+  }
+
+  /**
+   * タイトルを重複判定用に正規化する。
+   * 手動追記ページは「2026-07-18｜<動画タイトル>」のように日付が前置されるため、
+   * 日付接頭辞を落とし、記号・空白・全角半角の揺れを吸収してから比較する。
+   */
+  static normalizeTitle(title: string | null): string | null {
+    if (!title) return null;
+
+    const withoutDate = title.replace(/^\s*\d{4}[-/]\d{1,2}[-/]\d{1,2}\s*[｜|]\s*/, '');
+
+    const normalized = withoutDate
+      .normalize('NFKC')
+      .toLowerCase()
+      // 引用符（半角・全角・カーリー）・括弧・区切り記号・空白を除去して表記揺れを吸収する。
+      // 手動追記ページは " を、YouTube 側は “ ” を使うなど揺れるため。
+      .replace(
+        /[\s"'‘’“”「」『』（）()［］[\]【】<>《》｜|/\\,.、。・:;：；!?！？#-]/g,
+        ''
+      );
+
+    // 短すぎるタイトルは誤一致を招くため鍵にしない
+    if (normalized.length < 8) return null;
+
+    return `title:${normalized}`;
   }
 
   /**
@@ -147,12 +183,31 @@ export class NotionKnowledgeWriter {
   }
 
   /**
-   * summary テキストの「出典: https://www.youtube.com/watch?v=<id>」から動画 ID を抜く。
+   * summary テキストから動画 ID を抜く。
+   * 2 つの書式に対応する:
+   *   - 本機能が書く形式  : 「出典: https://www.youtube.com/watch?v=<id>」
+   *   - 人が手で書いた形式: 「出典：らんさ〜ずチャンネル（動画ID: <id> / ...）」
+   * 後者を拾わないと、導入前に手で追記された動画をもう一度取り込んで重複させる。
    */
   private extractVideoId(summary: string | null): string | null {
     if (!summary) return null;
-    const match = summary.match(/[?&]v=([\w-]{11})/);
-    return match ? match[1] : null;
+
+    const byUrl = summary.match(/[?&]v=([\w-]{11})/);
+    if (byUrl) return byUrl[1];
+
+    const byLabel = summary.match(/(?:動画ID|videoId|video_id)\s*[:：]\s*([\w-]{11})/i);
+    if (byLabel) return byLabel[1];
+
+    return null;
+  }
+
+  /**
+   * Notion の title プロパティからプレーンテキストを取り出す。
+   */
+  private extractTitle(prop: any): string | null {
+    if (!prop || prop.type !== 'title' || !Array.isArray(prop.title)) return null;
+    const text = prop.title.map((t: any) => t?.plain_text ?? '').join('');
+    return text.length > 0 ? text : null;
   }
 
   /**

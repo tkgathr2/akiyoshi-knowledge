@@ -52,8 +52,14 @@ export class YouTubeIngestService {
     const videos = await this.youtube.fetchLatestVideos(this.options.channelId, fetchLimit);
     result.fetched = videos.length;
 
-    const ingested = await this.writer.fetchIngestedVideoIds();
-    const newVideos = videos.filter((v) => !ingested.has(v.videoId));
+    // 動画 ID と正規化タイトルの両方で既存を判定する
+    // （本機能が書いたページは ID、人手で追記されたページはタイトルで一致する）
+    const ingested = await this.writer.fetchIngestedKeys();
+    const newVideos = videos.filter((v) => {
+      if (ingested.has(v.videoId)) return false;
+      const titleKey = NotionKnowledgeWriter.normalizeTitle(v.title);
+      return !(titleKey && ingested.has(titleKey));
+    });
     result.newVideos = newVideos.length;
 
     if (newVideos.length === 0) {

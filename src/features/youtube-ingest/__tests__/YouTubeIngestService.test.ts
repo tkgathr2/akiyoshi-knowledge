@@ -30,7 +30,7 @@ function makeDeps(videos: YouTubeVideo[], ingested: string[] = []) {
   } as any;
 
   const writer = {
-    fetchIngestedVideoIds: jest.fn().mockResolvedValue(new Set(ingested)),
+    fetchIngestedKeys: jest.fn().mockResolvedValue(new Set(ingested)),
     writeVideo: jest.fn(async (v: TranscribedVideo) => {
       written.push(v);
       return `page-${v.videoId}`;

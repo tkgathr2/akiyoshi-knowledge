@@ -100,7 +100,7 @@ describe('NotionKnowledgeWriter.writeVideo', () => {
   });
 });
 
-describe('NotionKnowledgeWriter.fetchIngestedVideoIds', () => {
+describe('NotionKnowledgeWriter.fetchIngestedKeys', () => {
   it('summary の出典 URL から取込済み動画 ID を抽出する', async () => {
     const writer = new NotionKnowledgeWriter('key', DB_ID, silentLogger);
     const { queryMock } = stubClient(writer);
@@ -127,27 +127,104 @@ describe('NotionKnowledgeWriter.fetchIngestedVideoIds', () => {
       has_more: false,
     });
 
-    const ids = await writer.fetchIngestedVideoIds();
+    const ids = await writer.fetchIngestedKeys();
 
     expect(ids.has('aqutSnAjK9A')).toBe(true);
     expect(ids.has('bbbbbbbbbbb')).toBe(true);
     expect(ids.size).toBe(2);
   });
 
-  it('出典 URL を持たない既存ページ（手動追記分）は無視する', async () => {
+  it('人が書いた「動画ID: xxx」形式からも動画 ID を抽出する', async () => {
     const writer = new NotionKnowledgeWriter('key', DB_ID, silentLogger);
     const { queryMock } = stubClient(writer);
 
+    // 実データ（本番 Notion 2026-07-19 実測）の書式
     queryMock.mockResolvedValue({
       results: [
-        { properties: { summary: { type: 'rich_text', rich_text: [{ plain_text: '手動メモ' }] } } },
-        { properties: {} },
+        {
+          properties: {
+            summary: {
+              type: 'rich_text',
+              rich_text: [
+                {
+                  plain_text:
+                    '出典：らんさ〜ずチャンネル（動画ID: aqutSnAjK9A / 長さ: 23:17 / アップロード: 2026-07-17）。要点：',
+                },
+              ],
+            },
+          },
+        },
       ],
       has_more: false,
     });
 
-    const ids = await writer.fetchIngestedVideoIds();
+    const keys = await writer.fetchIngestedKeys();
 
-    expect(ids.size).toBe(0);
+    expect(keys.has('aqutSnAjK9A')).toBe(true);
+  });
+
+  it('手動追記ページのタイトルも鍵にする（実データで重複を防げること）', async () => {
+    const writer = new NotionKnowledgeWriter('key', DB_ID, silentLogger);
+    const { queryMock } = stubClient(writer);
+
+    // 実データ（本番 Notion 2026-07-19 実測）: 日付接頭辞つき・半角ダブルクォート
+    queryMock.mockResolvedValue({
+      results: [
+        {
+          properties: {
+            title: {
+              type: 'title',
+              title: [
+                {
+                  plain_text:
+                    '2026-07-18｜農業AIスタートアップが作った"AI経営システム"を見せてもらったら凄すぎてひいちゃった｜東証上場社長',
+                },
+              ],
+            },
+          },
+        },
+      ],
+      has_more: false,
+    });
+
+    const keys = await writer.fetchIngestedKeys();
+
+    // 実データ（YouTube RSS 2026-07-19 実測）: カーリークォート
+    const fromYouTube = NotionKnowledgeWriter.normalizeTitle(
+      '農業AIスタートアップが作った”AI経営システム”を見せてもらったら凄すぎてひいちゃった｜東証上場社長'
+    );
+    expect(fromYouTube).not.toBeNull();
+    expect(keys.has(fromYouTube as string)).toBe(true);
+  });
+});
+
+describe('NotionKnowledgeWriter.normalizeTitle', () => {
+  it('日付接頭辞を取り除く', () => {
+    expect(NotionKnowledgeWriter.normalizeTitle('2026-07-18｜地方企業のマイクロM＆Aは伸びる')).toBe(
+      NotionKnowledgeWriter.normalizeTitle('地方企業のマイクロM＆Aは伸びる')
+    );
+  });
+
+  it('引用符・括弧・空白の揺れを吸収する', () => {
+    expect(NotionKnowledgeWriter.normalizeTitle('【売上の伸ばし方】伸びない経営者の特徴3選')).toBe(
+      NotionKnowledgeWriter.normalizeTitle('売上の伸ばし方 伸びない経営者の特徴3選')
+    );
+  });
+
+  it('全角と半角の違いを吸収する', () => {
+    expect(NotionKnowledgeWriter.normalizeTitle('ＡＩ経営システムの話をします')).toBe(
+      NotionKnowledgeWriter.normalizeTitle('AI経営システムの話をします')
+    );
+  });
+
+  it('別の動画は別の鍵になる', () => {
+    expect(NotionKnowledgeWriter.normalizeTitle('起業初心者が見落とす最初のステップ')).not.toBe(
+      NotionKnowledgeWriter.normalizeTitle('起業家が絶対にやるべき1つのこと')
+    );
+  });
+
+  it('短すぎるタイトルは鍵にしない（誤一致を防ぐ）', () => {
+    expect(NotionKnowledgeWriter.normalizeTitle('短い')).toBeNull();
+    expect(NotionKnowledgeWriter.normalizeTitle(null)).toBeNull();
   });
 });
