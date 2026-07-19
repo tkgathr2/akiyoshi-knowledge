@@ -6,10 +6,12 @@
  * 1 サイクルを回す。エラー時は Circuit Breaker を開き、監視ダッシュボード経由で
  * Slack へアラートを送出する。
  *
- * 注: 本リポジトリの実体は「Notion からナレッジを取得して LLM プロンプトへ安全注入する
- * 読み取り/注入パイプライン」であり、YouTube/NotebookLM への書き込み処理は含まない。
  * 本エントリポイントは既存コンポーネント（NotionKnowledgeClient / KnowledgeCache /
  * PromptComposer / KnowledgeSanitizer / MonitoringDashboard）の実 API に対して配線する。
+ *
+ * 加えて YOUTUBE_API_KEY と YOUTUBE_CHANNEL_ID が設定されている場合のみ、
+ * 各サイクルの先頭で YouTube 取込（新着動画 → 字幕で文字起こし → Notion 書き込み）を実行する。
+ * 未設定なら従来どおり読み取りパイプラインだけが動く（後方互換）。
  */
 
 import 'dotenv/config';
@@ -22,6 +24,10 @@ import { KnowledgeSanitizer } from './features/akiyoshi-knowledge/sanitizer/Know
 import { MonitoringDashboard } from './features/monitoring/MonitoringDashboard';
 import type { OperationRecord } from './features/monitoring/MetricsCollector';
 import type { KnowledgeLog } from './features/akiyoshi-knowledge/types/knowledge';
+import { YouTubeClient } from './features/youtube-ingest/clients/YouTubeClient';
+import { TranscriptClient } from './features/youtube-ingest/clients/TranscriptClient';
+import { NotionKnowledgeWriter } from './features/youtube-ingest/writers/NotionKnowledgeWriter';
+import { YouTubeIngestService } from './features/youtube-ingest/YouTubeIngestService';
 
 const logger = pino({ name: 'akiyoshi-knowledge', level: process.env.LOG_LEVEL || 'info' });
 
@@ -34,11 +40,18 @@ const RUN_ONCE = process.env.RUN_ONCE === 'true';
 /** 常駐時のサイクル間隔（既定 6 時間） */
 const CYCLE_INTERVAL_MS = Number(process.env.CYCLE_INTERVAL_MS || String(6 * 60 * 60 * 1000));
 
+/** YouTube 取込で 1 サイクルに見る動画数 */
+const YOUTUBE_FETCH_LIMIT = Number(process.env.YOUTUBE_FETCH_LIMIT || '10');
+/** YouTube 取込で 1 サイクルに書き込む上限 */
+const YOUTUBE_MAX_WRITES = Number(process.env.YOUTUBE_MAX_WRITES || '5');
+
 interface AppEnv {
   notionApiKey: string;
   notionPageId: string;
   slackWebhookUrl?: string;
   dryRun: boolean;
+  youtubeApiKey?: string;
+  youtubeChannelId?: string;
 }
 
 /**
@@ -60,7 +73,41 @@ function loadEnv(): AppEnv {
     notionPageId: notionPageId as string,
     slackWebhookUrl: process.env.SLACK_WEBHOOK_URL,
     dryRun: process.env.DRY_RUN === 'true',
+    youtubeApiKey: process.env.YOUTUBE_API_KEY,
+    youtubeChannelId: process.env.YOUTUBE_CHANNEL_ID,
   };
+}
+
+/**
+ * YouTube 取込サービスを組み立てる。
+ * YOUTUBE_API_KEY / YOUTUBE_CHANNEL_ID が両方揃っていない場合は null を返し、取込を行わない。
+ */
+function buildIngestService(env: AppEnv, logger: pino.Logger): YouTubeIngestService | null {
+  if (!env.youtubeApiKey || !env.youtubeChannelId) {
+    logger.info('YouTube ingest disabled (YOUTUBE_API_KEY / YOUTUBE_CHANNEL_ID not set)');
+    return null;
+  }
+
+  if (!YouTubeClient.isValidChannelId(env.youtubeChannelId)) {
+    // 起動時に落とさず警告に留める（読み取りパイプラインは動かし続ける）
+    logger.error(
+      { channelId: env.youtubeChannelId },
+      'YOUTUBE_CHANNEL_ID の形式が不正です (UC で始まる 24 文字が必要)。YouTube 取込を無効化します'
+    );
+    return null;
+  }
+
+  return new YouTubeIngestService(
+    new YouTubeClient(env.youtubeApiKey, logger),
+    new TranscriptClient(undefined, ['ja', 'en'], logger),
+    new NotionKnowledgeWriter(env.notionApiKey, env.notionPageId, logger),
+    {
+      channelId: env.youtubeChannelId,
+      fetchLimit: YOUTUBE_FETCH_LIMIT,
+      maxWritesPerCycle: YOUTUBE_MAX_WRITES,
+    },
+    logger
+  );
 }
 
 /**
@@ -83,9 +130,22 @@ function toOperationRecord(source: KnowledgeLog['source'], latency: number): Ope
 async function runCycle(
   client: NotionKnowledgeClient,
   cache: KnowledgeCache,
-  monitor: MonitoringDashboard
+  monitor: MonitoringDashboard,
+  ingest: YouTubeIngestService | null
 ): Promise<void> {
   const startedAt = Date.now();
+
+  // YouTube 取込を先に実行する（新着が Notion に入ってから読み取る順序にするため）。
+  // 取込の失敗は読み取りパイプラインを止めない（別系統として切り離す）。
+  if (ingest) {
+    try {
+      const result = await ingest.run();
+      // 新規を書き込んだらキャッシュを捨てて Notion から取り直す
+      if (result.written > 0) cache.clear(CACHE_KEY);
+    } catch (error) {
+      logger.error({ error }, 'YouTube ingest failed (continuing with read pipeline)');
+    }
+  }
 
   try {
     const log = await cache.get(CACHE_KEY, () => client.fetchLatest(FETCH_LIMIT));
@@ -150,13 +210,14 @@ async function main(): Promise<void> {
 
   const client = new NotionKnowledgeClient(env.notionApiKey, env.notionPageId, logger);
   const cache = new KnowledgeCache(logger);
+  const ingest = buildIngestService(env, logger);
 
   await monitor.start();
   logger.info({ runOnce: RUN_ONCE, cycleIntervalMs: CYCLE_INTERVAL_MS }, 'Akiyoshi knowledge service started');
 
   if (RUN_ONCE) {
     try {
-      await runCycle(client, cache, monitor);
+      await runCycle(client, cache, monitor, ingest);
     } finally {
       await monitor.stop();
     }
@@ -164,12 +225,12 @@ async function main(): Promise<void> {
   }
 
   // 常駐モード: 起動直後に 1 回 + 以降はインターバル実行
-  await runCycle(client, cache, monitor).catch((err) => {
+  await runCycle(client, cache, monitor, ingest).catch((err) => {
     logger.error({ err }, 'Initial cycle failed (continuing in daemon mode)');
   });
 
   const timer = setInterval(() => {
-    runCycle(client, cache, monitor).catch((err) => {
+    runCycle(client, cache, monitor, ingest).catch((err) => {
       logger.error({ err }, 'Scheduled cycle failed');
     });
   }, CYCLE_INTERVAL_MS);
