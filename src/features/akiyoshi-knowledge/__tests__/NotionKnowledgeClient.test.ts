@@ -77,7 +77,7 @@ describe('NotionKnowledgeClient', () => {
       expect(mockDatabasesQuery).toHaveBeenCalledWith({
         database_id: testPageId,
         page_size: 10,
-        sorts: [{ property: 'created_time', direction: 'descending' }],
+        sorts: [{ timestamp: 'created_time', direction: 'descending' }],
         filter: {
           property: 'status',
           status: { equals: '完了' },

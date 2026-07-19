@@ -93,7 +93,7 @@ export class NotionKnowledgeClient {
         page_size: Math.min(limit, 100),
         sorts: [
           {
-            property: 'created_time',
+            timestamp: 'created_time',
             direction: 'descending',
           },
         ],
