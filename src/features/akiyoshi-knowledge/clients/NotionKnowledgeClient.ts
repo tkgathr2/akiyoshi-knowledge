@@ -172,11 +172,11 @@ export class NotionKnowledgeClient {
       } catch (error) {
         lastError = error as Error;
 
-        // 構造的エラー（401/403）は即リトライ打ち切り
-        if (error instanceof NotionFetchError && error.isStructuralError()) {
+        // リトライ不可（401/403 構造的エラー、400/404 等のクライアントエラー）は即打ち切り
+        if (error instanceof NotionFetchError && !error.isRetryable()) {
           this.logger.warn(
             { statusCode: error.statusCode, attempt },
-            'Structural error - stop retrying'
+            'Non-retryable error - stop retrying'
           );
           throw error;
         }

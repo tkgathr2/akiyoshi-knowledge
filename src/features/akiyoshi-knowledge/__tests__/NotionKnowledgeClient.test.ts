@@ -178,6 +178,22 @@ describe('NotionKnowledgeClient', () => {
       expect(mockDatabasesQuery).toHaveBeenCalledTimes(1);
     });
 
+    it('should not retry on 404 (not found)', async () => {
+      const error = new NotionFetchError(404, 'object_not_found', 'Database not found');
+      mockDatabasesQuery.mockRejectedValueOnce(error);
+
+      await expect(client.fetchLatest(10)).rejects.toThrow(NotionFetchError);
+      expect(mockDatabasesQuery).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not retry on 400 (bad request)', async () => {
+      const error = new NotionFetchError(400, 'validation_error', 'Invalid request');
+      mockDatabasesQuery.mockRejectedValueOnce(error);
+
+      await expect(client.fetchLatest(10)).rejects.toThrow(NotionFetchError);
+      expect(mockDatabasesQuery).toHaveBeenCalledTimes(1);
+    });
+
     it('should fail after max retries', async () => {
       mockDatabasesQuery
         .mockRejectedValueOnce(new Error('429 Too Many Requests'))

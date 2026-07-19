@@ -17,6 +17,7 @@ export class KnowledgeSanitizer {
    * - 指示上書き系（ignore/disregard previous instructions 等）
    * - 疑似システムタグ（<system>, [INST] 等）
    * - ナレッジデリミタなりすまし（<akiyoshi_knowledge> の偽装）
+   * - 日本語の指示上書き・ロール上書き・マスク解除系
    */
   private static readonly INJECTION_PATTERNS: RegExp[] = [
     /ignore\s+(all\s+)?(the\s+)?(previous|prior|above)\s+instructions?/gi,
@@ -29,6 +30,12 @@ export class KnowledgeSanitizer {
     /new\s+instructions?\s*:/gi,
     /system\s*prompt/gi,
     /<\s*\/?\s*akiyoshi_knowledge[^>]*>/gi,
+    // 日本語パターン
+    /(これまで|以前|上記)の(指示|命令|プロンプト)を?(無視|忘れ)/gi,
+    /あなたは(今|これ)から/gi,
+    /(システム|システムプロンプト|新しい指示)\s*[:：]/gi,
+    /^>?\s*マスク外/gim,
+    /マスク解除/gi,
   ];
 
   /**
