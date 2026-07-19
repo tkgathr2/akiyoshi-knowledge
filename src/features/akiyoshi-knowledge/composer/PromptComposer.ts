@@ -19,16 +19,15 @@ export class PromptComposer {
 
   /**
    * ナレッジエントリ配列をLLMプロンプト注入用に構成
-   * - 各エントリの title/summary は KnowledgeSanitizer でマスキング済みにしてから埋め込む
+   * - 各エントリは KnowledgeSanitizer.sanitizeEntry() でマスキング + title+summary 合計 2000字制限を適用してから埋め込む
    * - ガード文 + 専用デリミタ（<akiyoshi_knowledge readonly>...</akiyoshi_knowledge>）で境界化
    */
   static compose(entries: KnowledgeEntry[]): ComposedPrompt {
     const body = entries
       .map((e) => {
-        const dateStr = e.createdAt.toISOString().slice(0, 10);
-        const title = KnowledgeSanitizer.sanitize(e.title);
-        const summary = KnowledgeSanitizer.sanitize(e.summary);
-        return `- ${dateStr} | ${title}: ${summary}`;
+        const sanitized = KnowledgeSanitizer.sanitizeEntry(e);
+        const dateStr = sanitized.createdAt.toISOString().slice(0, 10);
+        return `- ${dateStr} | ${sanitized.title}: ${sanitized.summary}`;
       })
       .join('\n');
 

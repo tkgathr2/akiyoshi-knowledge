@@ -79,6 +79,24 @@ describe('PromptComposer', () => {
     });
   });
 
+  describe('文字数制限（sanitizeEntry 経由で title+summary 合計 2000字に制限）', () => {
+    it('should truncate an oversized entry to 2000 characters before composing', () => {
+      const entry = makeEntry({ title: 'T'.repeat(100), summary: 'S'.repeat(3000) });
+      const composed = PromptComposer.compose([entry]);
+
+      const openIdx = composed.knowledgeBlock.indexOf('<akiyoshi_knowledge readonly>');
+      const closeIdx = composed.knowledgeBlock.indexOf('</akiyoshi_knowledge>');
+      const inner = composed.knowledgeBlock.slice(
+        openIdx + '<akiyoshi_knowledge readonly>'.length,
+        closeIdx
+      );
+
+      // 本文中の T/S の合計出現数は 2000 を超えない（メタ文字 "- YYYY-MM-DD | : \n" を除く）
+      const tsCount = (inner.match(/[TS]/g) || []).length;
+      expect(tsCount).toBeLessThanOrEqual(2000);
+    });
+  });
+
   describe('複数エントリ', () => {
     it('should compose multiple entries as separate lines', () => {
       const entries = [
