@@ -11,7 +11,7 @@
  */
 
 import pino from 'pino';
-import { YouTubeClient } from './clients/YouTubeClient';
+import { VideoSource } from './clients/VideoSource';
 import { TranscriptClient } from './clients/TranscriptClient';
 import { NotionKnowledgeWriter } from './writers/NotionKnowledgeWriter';
 import { IngestResult } from './types/video';
@@ -31,7 +31,7 @@ export class YouTubeIngestService {
   private logger: pino.Logger;
 
   constructor(
-    private readonly youtube: YouTubeClient,
+    private readonly youtube: VideoSource,
     private readonly transcriber: TranscriptClient,
     private readonly writer: NotionKnowledgeWriter,
     private readonly options: YouTubeIngestOptions,

@@ -10,6 +10,7 @@
 
 import pino from 'pino';
 import { YouTubeVideo } from '../types/video';
+import { VideoSource } from './VideoSource';
 
 const API_BASE = 'https://www.googleapis.com/youtube/v3';
 
@@ -34,7 +35,7 @@ export class YouTubeFetchError extends Error {
   }
 }
 
-export class YouTubeClient {
+export class YouTubeClient implements VideoSource {
   private readonly TIMEOUT_MS = 10000;
   private logger: pino.Logger;
 

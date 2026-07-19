@@ -9,9 +9,11 @@
  * 本エントリポイントは既存コンポーネント（NotionKnowledgeClient / KnowledgeCache /
  * PromptComposer / KnowledgeSanitizer / MonitoringDashboard）の実 API に対して配線する。
  *
- * 加えて YOUTUBE_API_KEY と YOUTUBE_CHANNEL_ID が設定されている場合のみ、
- * 各サイクルの先頭で YouTube 取込（新着動画 → 字幕で文字起こし → Notion 書き込み）を実行する。
- * 未設定なら従来どおり読み取りパイプラインだけが動く（後方互換）。
+ * 加えて YOUTUBE_CHANNEL_ID が設定されている場合、各サイクルの先頭で YouTube 取込
+ * （新着動画 → 字幕で文字起こし → Notion 書き込み）を実行する。
+ * 新着の取得は既定で YouTube の公開 RSS を使うため API キーは不要。
+ * YOUTUBE_API_KEY を設定した場合のみ Data API v3 版に切り替わる（15 件より多く遡れる）。
+ * YOUTUBE_CHANNEL_ID 未設定なら従来どおり読み取りパイプラインだけが動く（後方互換）。
  */
 
 import 'dotenv/config';
@@ -25,6 +27,8 @@ import { MonitoringDashboard } from './features/monitoring/MonitoringDashboard';
 import type { OperationRecord } from './features/monitoring/MetricsCollector';
 import type { KnowledgeLog } from './features/akiyoshi-knowledge/types/knowledge';
 import { YouTubeClient } from './features/youtube-ingest/clients/YouTubeClient';
+import { YouTubeFeedClient } from './features/youtube-ingest/clients/YouTubeFeedClient';
+import type { VideoSource } from './features/youtube-ingest/clients/VideoSource';
 import { TranscriptClient } from './features/youtube-ingest/clients/TranscriptClient';
 import { NotionKnowledgeWriter } from './features/youtube-ingest/writers/NotionKnowledgeWriter';
 import { YouTubeIngestService } from './features/youtube-ingest/YouTubeIngestService';
@@ -80,15 +84,15 @@ function loadEnv(): AppEnv {
 
 /**
  * YouTube 取込サービスを組み立てる。
- * YOUTUBE_API_KEY / YOUTUBE_CHANNEL_ID が両方揃っていない場合は null を返し、取込を行わない。
+ * YOUTUBE_CHANNEL_ID が未設定・不正な場合は null を返し、取込を行わない。
  */
 function buildIngestService(env: AppEnv, logger: pino.Logger): YouTubeIngestService | null {
-  if (!env.youtubeApiKey || !env.youtubeChannelId) {
-    logger.info('YouTube ingest disabled (YOUTUBE_API_KEY / YOUTUBE_CHANNEL_ID not set)');
+  if (!env.youtubeChannelId) {
+    logger.info('YouTube ingest disabled (YOUTUBE_CHANNEL_ID not set)');
     return null;
   }
 
-  if (!YouTubeClient.isValidChannelId(env.youtubeChannelId)) {
+  if (!YouTubeFeedClient.isValidChannelId(env.youtubeChannelId)) {
     // 起動時に落とさず警告に留める（読み取りパイプラインは動かし続ける）
     logger.error(
       { channelId: env.youtubeChannelId },
@@ -97,8 +101,18 @@ function buildIngestService(env: AppEnv, logger: pino.Logger): YouTubeIngestServ
     return null;
   }
 
+  // 既定は RSS（API キー不要・クォータなし）。キーがある場合のみ Data API 版を使う。
+  const source: VideoSource = env.youtubeApiKey
+    ? new YouTubeClient(env.youtubeApiKey, logger)
+    : new YouTubeFeedClient(logger);
+
+  logger.info(
+    { source: env.youtubeApiKey ? 'data-api' : 'rss-feed', channelId: env.youtubeChannelId },
+    'YouTube ingest enabled'
+  );
+
   return new YouTubeIngestService(
-    new YouTubeClient(env.youtubeApiKey, logger),
+    source,
     new TranscriptClient(undefined, ['ja', 'en'], logger),
     new NotionKnowledgeWriter(env.notionApiKey, env.notionPageId, logger),
     {
