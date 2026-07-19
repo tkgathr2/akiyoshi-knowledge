@@ -275,6 +275,17 @@ Alerts Triggered: ${aggregation.alertsTriggered}
   }
 
   /**
+   * 直近ウィンドウ内の通知失敗件数
+   * M3修正: ALERT-008(slackNotificationFailed)がAlertEngine側で読み取るための実数ソース
+   */
+  getRecentFailureCount(windowMs: number = 5 * 60 * 1000): number {
+    const cutoffTime = new Date(Date.now() - windowMs);
+    return this.notificationHistory.filter(
+      (n) => n.status === 'failed' && n.timestamp > cutoffTime
+    ).length;
+  }
+
+  /**
    * 失敗した通知の統計
    */
   getFailedNotificationStats() {

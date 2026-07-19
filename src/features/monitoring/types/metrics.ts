@@ -15,6 +15,7 @@ export interface MetricSnapshot {
   fallbackCount: number; // 件数: フォールバック件数（観察）
   notionApiResponseTime: number; // ms: Notion API応答時間
   cacheUtilizationPercent: number; // 0-100: キャッシュサイズ利用率
+  slackNotificationFailureCount?: number; // 件数: 直近のSlack通知失敗数（M3修正: ALERT-008検知用。NotificationEngineから注入）
 }
 
 export interface MetricConfig {

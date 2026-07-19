@@ -162,6 +162,10 @@ export class MonitoringDashboard {
     try {
       // 現在のメトリクスを取得
       const snapshot = this.metricsCollector.getCurrentMetrics();
+
+      // M3修正: NotificationEngineの実Slack通知失敗数をsnapshotに注入（ALERT-008の実データ化）
+      snapshot.slackNotificationFailureCount = this.notificationEngine.getRecentFailureCount();
+
       this.lastMetricSnapshot = snapshot;
 
       // メトリクスをログ記録

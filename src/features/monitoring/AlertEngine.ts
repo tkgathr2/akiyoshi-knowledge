@@ -245,10 +245,14 @@ export class AlertEngine {
 
     // メトリクス値の取得
     switch (metric) {
-      case 'errorRate':
-        // totalOpsを分母にした実値ベースの計算（P0-3修正: 旧式 errorCount/(errorCount+100) は実値と乖離するため廃止）
-        value = snapshot.totalOps > 0 ? (snapshot.errorCount / snapshot.totalOps) * 100 : 0;
+      case 'errorRate': {
+        // M4修正: totalOps（fetch+cache_hit+fallback）はerrorCountを含まないため、
+        // 全件エラー時に totalOps=0 となり errorRate が誤って 0% になっていた（総障害の見逃し）。
+        // errorRateの分母は totalOps + errorCount とし、エラーを含む操作全体に対する比率を算出する。
+        const errorRateDenominator = snapshot.totalOps + snapshot.errorCount;
+        value = errorRateDenominator > 0 ? (snapshot.errorCount / errorRateDenominator) * 100 : 0;
         break;
+      }
       case 'circuitBreakerOpen':
         value = snapshot.circuitBreakerOpen ? 1 : 0;
         break;
@@ -265,12 +269,19 @@ export class AlertEngine {
         value = snapshot.cacheHitRate;
         break;
       case 'slackNotificationFailed':
-        // これはアプリケーション層で検知した場合のみセット
-        value = 0; // TODO: 別途トラッキング機構で検知
+        // M3修正: NotificationEngineの実失敗カウントがMonitoringDashboard経由でsnapshotに注入される。
+        // 直近ウィンドウ内で1件以上の通知失敗があれば true(1) とみなす。
+        value = (snapshot.slackNotificationFailureCount ?? 0) > 0 ? 1 : 0;
         break;
       default:
         this.logger.warn({ metric }, 'Unknown metric in rule condition');
         return null;
+    }
+
+    // M6修正: totalOps=0（アイドル・無操作状態）では successRate=0 が「異常」ではなく
+    // 「データ無し」を意味するため、successRateメトリクスのアラート評価自体をスキップし誤アラートを防ぐ。
+    if (metric === 'successRate' && snapshot.totalOps === 0) {
+      return null;
     }
 
     // 条件判定
