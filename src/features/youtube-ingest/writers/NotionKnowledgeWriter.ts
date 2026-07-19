@@ -17,6 +17,14 @@ const RICH_TEXT_LIMIT = 2000;
 /** 1 リクエストで送れる子ブロック数の上限（Notion API 制約） */
 const CHILDREN_LIMIT = 100;
 
+/**
+ * 書き込み時に設定する status。
+ * 読み取り側（NotionKnowledgeClient）が status='完了' で絞り込むため、
+ * ここで '完了' を入れないと取り込んだ動画が読み取りパイプラインに乗らない。
+ * 実 DB の status オプションは 未着手 / 進行中 / 完了 の 3 つ。
+ */
+const INGESTED_STATUS = '完了';
+
 export class NotionKnowledgeWriter {
   private client: Client;
   private logger: pino.Logger;
@@ -80,6 +88,9 @@ export class NotionKnowledgeWriter {
         },
         summary: {
           rich_text: [{ type: 'text', text: { content: summary } }],
+        },
+        status: {
+          status: { name: INGESTED_STATUS },
         },
       },
       children: children.slice(0, CHILDREN_LIMIT),
