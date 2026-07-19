@@ -147,8 +147,6 @@ async function runCycle(
   monitor: MonitoringDashboard,
   ingest: YouTubeIngestService | null
 ): Promise<void> {
-  const startedAt = Date.now();
-
   // YouTube 取込を先に実行する（新着が Notion に入ってから読み取る順序にするため）。
   // 取込の失敗は読み取りパイプラインを止めない（別系統として切り離す）。
   if (ingest) {
@@ -160,6 +158,11 @@ async function runCycle(
       logger.error({ error }, 'YouTube ingest failed (continuing with read pipeline)');
     }
   }
+
+  // 計測開始は取込の「後」。取込は外部 API を何度も叩くため、ここより前に置くと
+  // 取込の所要時間が Notion のレスポンスタイムとして記録され、
+  // 実際には正常なのに「Notion API Degraded」アラートが誤発報する。
+  const startedAt = Date.now();
 
   try {
     const log = await cache.get(CACHE_KEY, () => client.fetchLatest(FETCH_LIMIT));
