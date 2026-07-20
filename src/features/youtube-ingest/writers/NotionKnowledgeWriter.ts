@@ -25,17 +25,32 @@ const CHILDREN_LIMIT = 100;
  */
 const INGESTED_STATUS = '完了';
 
+/** ページ本文のキーポイント見出し */
+const KEYPOINTS_HEADING = 'キーポイント';
+
+export interface NotionKnowledgeWriterOptions {
+  /**
+   * キーポイントを書き込む Notion プロパティ名（rich_text 型）。
+   * 未指定なら「プロパティには書かず、ページ本文にだけ」キーポイントを出す。
+   * 実 DB に該当プロパティを追加した場合のみ設定する（未追加の DB に書くと Notion API が 400 を返すため）。
+   */
+  keypointsProperty?: string;
+}
+
 export class NotionKnowledgeWriter {
   private client: Client;
   private logger: pino.Logger;
+  private readonly keypointsProperty?: string;
 
   constructor(
     apiKey: string,
     private readonly databaseId: string,
-    logger?: pino.Logger
+    logger?: pino.Logger,
+    options?: NotionKnowledgeWriterOptions
   ) {
     this.client = new Client({ auth: apiKey });
     this.logger = logger || pino({ name: 'NotionKnowledgeWriter' });
+    this.keypointsProperty = options?.keypointsProperty;
   }
 
   /**
@@ -110,25 +125,50 @@ export class NotionKnowledgeWriter {
    * 文字起こし済み動画を Notion に 1 ページとして書き込む。
    * - title プロパティ = 動画タイトル
    * - summary プロパティ = 「出典: <URL>」＋文字起こしの冒頭（重複判定にも使う）
-   * - ページ本文 = 文字起こし全文（2000 字ごとに段落分割）
+   * - keypoints プロパティ = キーポイントを 1 行 1 件で連結（keypointsProperty 設定時のみ）
+   * - ページ本文 = 「キーポイント」見出し＋箇条書き（あれば）＋文字起こし全文
+   *
+   * @param video 文字起こし済み動画
+   * @param keypoints 抽出済みキーポイント（省略・空なら本文にキーポイント節を出さない）
    */
-  async writeVideo(video: TranscribedVideo): Promise<string> {
+  async writeVideo(video: TranscribedVideo, keypoints: string[] = []): Promise<string> {
     const summary = this.buildSummary(video);
-    const children = this.buildTranscriptBlocks(video.transcript);
+    const cleanKeypoints = this.normalizeKeypoints(keypoints);
+
+    // キーポイント節（あれば）→ 文字起こし全文 の順で本文を構成する
+    const children: BlockObjectRequest[] = [
+      ...this.buildKeypointBlocks(cleanKeypoints),
+      ...this.buildTranscriptBlocks(video.transcript),
+    ];
+
+    const properties: Record<string, unknown> = {
+      title: {
+        title: [{ type: 'text', text: { content: video.title.slice(0, RICH_TEXT_LIMIT) } }],
+      },
+      summary: {
+        rich_text: [{ type: 'text', text: { content: summary } }],
+      },
+      status: {
+        status: { name: INGESTED_STATUS },
+      },
+    };
+
+    // keypoints プロパティは「設定済み かつ 抽出できた」ときだけ書く。
+    // 未設定の DB に書くと Notion API が 400 を返すため、既定では書かない。
+    if (this.keypointsProperty && cleanKeypoints.length > 0) {
+      properties[this.keypointsProperty] = {
+        rich_text: [
+          {
+            type: 'text',
+            text: { content: this.buildKeypointsPropertyText(cleanKeypoints) },
+          },
+        ],
+      };
+    }
 
     const response = await this.client.pages.create({
       parent: { database_id: this.databaseId },
-      properties: {
-        title: {
-          title: [{ type: 'text', text: { content: video.title.slice(0, RICH_TEXT_LIMIT) } }],
-        },
-        summary: {
-          rich_text: [{ type: 'text', text: { content: summary } }],
-        },
-        status: {
-          status: { name: INGESTED_STATUS },
-        },
-      },
+      properties: properties as never,
       children: children.slice(0, CHILDREN_LIMIT),
     });
 
@@ -143,11 +183,65 @@ export class NotionKnowledgeWriter {
     }
 
     this.logger.info(
-      { videoId: video.videoId, pageId, blocks: children.length },
+      { videoId: video.videoId, pageId, blocks: children.length, keypoints: cleanKeypoints.length },
       'Notion page created'
     );
 
     return pageId;
+  }
+
+  /**
+   * キーポイントを正規化する（空要素除去・トリム・200 字上限）。
+   */
+  private normalizeKeypoints(keypoints: string[]): string[] {
+    if (!Array.isArray(keypoints)) return [];
+    const out: string[] = [];
+    for (const kp of keypoints) {
+      if (typeof kp !== 'string') continue;
+      const text = kp.trim();
+      if (text.length === 0) continue;
+      out.push(text.slice(0, RICH_TEXT_LIMIT));
+    }
+    return out;
+  }
+
+  /**
+   * キーポイントをページ本文のブロック（見出し＋箇条書き）に変換する。
+   * キーポイントが無ければ空配列を返す（本文に節を作らない）。
+   */
+  private buildKeypointBlocks(keypoints: string[]): BlockObjectRequest[] {
+    if (keypoints.length === 0) return [];
+
+    const blocks: BlockObjectRequest[] = [
+      {
+        object: 'block',
+        type: 'heading_2',
+        heading_2: {
+          rich_text: [{ type: 'text', text: { content: KEYPOINTS_HEADING } }],
+        },
+      },
+    ];
+
+    for (const kp of keypoints) {
+      blocks.push({
+        object: 'block',
+        type: 'bulleted_list_item',
+        bulleted_list_item: {
+          rich_text: [{ type: 'text', text: { content: kp } }],
+        },
+      });
+    }
+
+    return blocks;
+  }
+
+  /**
+   * keypoints プロパティ（rich_text）に入れる文字列を作る。
+   * 「・要点1\n・要点2 …」形式。2000 字上限に収める。
+   */
+  private buildKeypointsPropertyText(keypoints: string[]): string {
+    const joined = keypoints.map((kp) => `・${kp}`).join('\n');
+    return joined.length > RICH_TEXT_LIMIT ? joined.slice(0, RICH_TEXT_LIMIT) : joined;
   }
 
   /**

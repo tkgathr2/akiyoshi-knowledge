@@ -41,6 +41,15 @@ export interface IngestResult {
   /** Notion への書き込みに成功した数 */
   written: number;
 
+  /** キーポイント抽出に成功した動画数（written の内数） */
+  keypointsExtracted: number;
+
+  /**
+   * キーポイント抽出に失敗した動画数（written の内数）。
+   * 抽出失敗でも動画本体（文字起こし）は Notion に書き込まれるため written には含める。
+   */
+  keypointFailed: number;
+
   /** 文字起こし取得に失敗してスキップした動画 ID */
   skipped: Array<{ videoId: string; reason: string }>;
 }

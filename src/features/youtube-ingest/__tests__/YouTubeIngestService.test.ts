@@ -156,3 +156,98 @@ describe('YouTubeIngestService', () => {
     expect(written.map((v) => v.videoId)).toEqual(['oldoldoldol', 'midmidmidmi']);
   });
 });
+
+describe('YouTubeIngestService（キーポイント抽出の統合）', () => {
+  it('extractor があればキーポイントを抽出して writeVideo に渡す（keypointsExtracted 加算）', async () => {
+    const { youtube, transcriber, writer } = makeDeps([makeVideo('aaaaaaaaaaa')]);
+    const extractor = { extract: jest.fn(async () => ['要点1', '要点2', '要点3']) } as any;
+
+    const service = new YouTubeIngestService(
+      youtube,
+      transcriber,
+      writer,
+      { channelId: 'UC' + 'x'.repeat(22) },
+      silentLogger,
+      extractor
+    );
+
+    const result = await service.run();
+
+    expect(result.written).toBe(1);
+    expect(result.keypointsExtracted).toBe(1);
+    expect(result.keypointFailed).toBe(0);
+    expect(extractor.extract).toHaveBeenCalledTimes(1);
+    // writeVideo の第2引数にキーポイントが渡る
+    expect(writer.writeVideo.mock.calls[0][1]).toEqual(['要点1', '要点2', '要点3']);
+  });
+
+  it('キーポイント抽出が失敗しても動画本体は書き込む（keypointFailed 加算・keypoints は空）', async () => {
+    const { youtube, transcriber, writer } = makeDeps([makeVideo('aaaaaaaaaaa')]);
+    const extractor = {
+      extract: jest.fn(async () => {
+        throw new Error('Haiku 落ちた');
+      }),
+    } as any;
+
+    const service = new YouTubeIngestService(
+      youtube,
+      transcriber,
+      writer,
+      { channelId: 'UC' + 'x'.repeat(22) },
+      silentLogger,
+      extractor
+    );
+
+    const result = await service.run();
+
+    expect(result.written).toBe(1); // 動画本体は書き込まれる
+    expect(result.keypointsExtracted).toBe(0);
+    expect(result.keypointFailed).toBe(1);
+    expect(writer.writeVideo.mock.calls[0][1]).toEqual([]); // キーポイントなしで書く
+  });
+
+  it('Notion 書き込みの一時的失敗はリトライし、回復すれば written に数える', async () => {
+    const { youtube, transcriber, writer } = makeDeps([makeVideo('aaaaaaaaaaa')]);
+    let attempts = 0;
+    writer.writeVideo = jest.fn(async () => {
+      attempts += 1;
+      if (attempts < 2) throw { status: 503 };
+      return 'page-ok';
+    });
+
+    const service = new YouTubeIngestService(
+      youtube,
+      transcriber,
+      writer,
+      { channelId: 'UC' + 'x'.repeat(22), sleep: async () => undefined },
+      silentLogger
+    );
+
+    const result = await service.run();
+
+    expect(result.written).toBe(1);
+    expect(writer.writeVideo).toHaveBeenCalledTimes(2);
+    expect(result.skipped).toHaveLength(0);
+  });
+
+  it('Notion 書き込みが恒久的失敗(4xx)なら再試行せずスキップに落とす', async () => {
+    const { youtube, transcriber, writer } = makeDeps([makeVideo('aaaaaaaaaaa')]);
+    writer.writeVideo = jest.fn(async () => {
+      throw { status: 400, message: 'invalid property' };
+    });
+
+    const service = new YouTubeIngestService(
+      youtube,
+      transcriber,
+      writer,
+      { channelId: 'UC' + 'x'.repeat(22), sleep: async () => undefined },
+      silentLogger
+    );
+
+    const result = await service.run();
+
+    expect(result.written).toBe(0);
+    expect(writer.writeVideo).toHaveBeenCalledTimes(1); // 4xx は即中断
+    expect(result.skipped).toHaveLength(1);
+  });
+});
