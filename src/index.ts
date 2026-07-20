@@ -31,6 +31,8 @@ import { YouTubeFeedClient } from './features/youtube-ingest/clients/YouTubeFeed
 import type { VideoSource } from './features/youtube-ingest/clients/VideoSource';
 import { TranscriptClient } from './features/youtube-ingest/clients/TranscriptClient';
 import { NotionKnowledgeWriter } from './features/youtube-ingest/writers/NotionKnowledgeWriter';
+import { HaikuKeyPointExtractor } from './features/youtube-ingest/extractors/HaikuKeyPointExtractor';
+import type { KeyPointExtractor } from './features/youtube-ingest/extractors/HaikuKeyPointExtractor';
 import { YouTubeIngestService } from './features/youtube-ingest/YouTubeIngestService';
 
 const logger = pino({ name: 'akiyoshi-knowledge', level: process.env.LOG_LEVEL || 'info' });
@@ -56,6 +58,8 @@ interface AppEnv {
   dryRun: boolean;
   youtubeApiKey?: string;
   youtubeChannelId?: string;
+  anthropicApiKey?: string;
+  keypointsProperty?: string;
 }
 
 /**

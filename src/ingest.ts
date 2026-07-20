@@ -22,6 +22,7 @@ import pino from 'pino';
 import { YouTubeFeedClient } from './features/youtube-ingest/clients/YouTubeFeedClient';
 import { TranscriptClient } from './features/youtube-ingest/clients/TranscriptClient';
 import { NotionKnowledgeWriter } from './features/youtube-ingest/writers/NotionKnowledgeWriter';
+import { HaikuKeyPointExtractor } from './features/youtube-ingest/extractors/HaikuKeyPointExtractor';
 import { YouTubeIngestService } from './features/youtube-ingest/YouTubeIngestService';
 
 const logger = pino({ name: 'akiyoshi-ingest', level: process.env.LOG_LEVEL || 'info' });
@@ -30,6 +31,10 @@ const logger = pino({ name: 'akiyoshi-ingest', level: process.env.LOG_LEVEL || '
 const FETCH_LIMIT = Number(process.env.YOUTUBE_FETCH_LIMIT || '15');
 /** 1 サイクルで書き込む上限 */
 const MAX_WRITES = Number(process.env.YOUTUBE_MAX_WRITES || '5');
+/** キーポイント抽出モデル（既定 claude-haiku-4-5） */
+const KEYPOINT_MODEL = process.env.KEYPOINT_MODEL || 'claude-haiku-4-5';
+/** キーポイントを書き込む Notion プロパティ名（未設定なら本文にのみ出す） */
+const KEYPOINTS_PROPERTY = process.env.NOTION_KEYPOINTS_PROPERTY;
 
 async function main(): Promise<void> {
   const notionApiKey = process.env.NOTION_API_KEY;
@@ -50,12 +55,24 @@ async function main(): Promise<void> {
     );
   }
 
+  // キーポイント抽出は ANTHROPIC_API_KEY があるときだけ有効化する（無ければ従来どおり文字起こしのみ）
+  const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+  const extractor = anthropicApiKey
+    ? new HaikuKeyPointExtractor({ apiKey: anthropicApiKey, model: KEYPOINT_MODEL, logger })
+    : undefined;
+  if (!extractor) {
+    logger.warn('ANTHROPIC_API_KEY 未設定のためキーポイント抽出を無効化します（文字起こしのみ取込）');
+  }
+
   const service = new YouTubeIngestService(
     new YouTubeFeedClient(logger),
     new TranscriptClient(undefined, ['ja', 'en'], logger),
-    new NotionKnowledgeWriter(notionApiKey as string, notionPageId as string, logger),
+    new NotionKnowledgeWriter(notionApiKey as string, notionPageId as string, logger, {
+      keypointsProperty: KEYPOINTS_PROPERTY,
+    }),
     { channelId: channelId as string, fetchLimit: FETCH_LIMIT, maxWritesPerCycle: MAX_WRITES },
-    logger
+    logger,
+    extractor
   );
 
   const result = await service.run();
@@ -65,6 +82,8 @@ async function main(): Promise<void> {
       fetched: result.fetched,
       newVideos: result.newVideos,
       written: result.written,
+      keypointsExtracted: result.keypointsExtracted,
+      keypointFailed: result.keypointFailed,
       skipped: result.skipped.length,
     },
     'Ingest finished'
